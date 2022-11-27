@@ -26,7 +26,10 @@ type errorResponse struct {
 	Error string `json:"error"`
 }
 
-var nodeEndpoint string
+var (
+	nodeEndpoint string
+	verbose      bool
+)
 
 func proxyRequest(writer http.ResponseWriter, request *http.Request) {
 	if request.TLS == nil {
@@ -49,8 +52,13 @@ func proxyRequest(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 
+	if verbose {
+		fmt.Println("Got request: " + string(body))
+	}
+
 	res, err := http.Post(nodeEndpoint, applicationJson, bytes.NewBuffer(body))
 	if err != nil {
+		fmt.Println("Could not connect to node: " + err.Error())
 		handleProxyErr(writer, err.Error())
 		return
 	}
@@ -101,15 +109,20 @@ func main() {
 		Version: "1.0.0",
 		Flags: []cli.Flag{
 			&cli.StringFlag{
-				Name:    nodeEndpointFlag,
-				Aliases: []string{"n"},
-				Usage:   "Ethereum RPC that should be used",
-				Value:   "http://127.0.0.1:9546",
+				Name:        nodeEndpointFlag,
+				Aliases:     []string{"n"},
+				Usage:       "Ethereum RPC that should be used",
+				Value:       "http://127.0.0.1:9546",
+				Destination: &nodeEndpoint,
+			},
+			&cli.BoolFlag{
+				Name:        "verbose",
+				Usage:       "Verbose logging about the requests going through",
+				Value:       false,
+				Destination: &verbose,
 			},
 		},
 		Action: func(cctx *cli.Context) error {
-			nodeEndpoint = cctx.String(nodeEndpointFlag)
-
 			http.HandleFunc("/", proxyRequest)
 			g, _ := errgroup.WithContext(context.Background())
 
