@@ -5,23 +5,28 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/urfave/cli/v2"
 	"golang.org/x/sync/errgroup"
 	"io"
 	"net/http"
+	"os"
 	"path"
 )
 
 const (
 	addr            = "0.0.0.0"
-	nodeEndpoint    = "http://127.0.0.1:9546"
 	applicationJson = "application/json"
 
 	certDir = "cert"
+
+	nodeEndpointFlag = "node"
 )
 
 type errorResponse struct {
 	Error string `json:"error"`
 }
+
+var nodeEndpoint string
 
 func proxyRequest(writer http.ResponseWriter, request *http.Request) {
 	if request.TLS == nil {
@@ -90,33 +95,52 @@ func jsonStringify(msg any) []byte {
 }
 
 func main() {
-	http.HandleFunc("/", proxyRequest)
-	g, _ := errgroup.WithContext(context.Background())
+	app := &cli.App{
+		Name:    "liberte",
+		Usage:   "proxy Ethereum RPC requests to your own node",
+		Version: "1.0.0",
+		Flags: []cli.Flag{
+			&cli.StringFlag{
+				Name:    nodeEndpointFlag,
+				Aliases: []string{"n"},
+				Usage:   "Ethereum RPC that should be used",
+				Value:   "http://127.0.0.1:9546",
+			},
+		},
+		Action: func(cctx *cli.Context) error {
+			nodeEndpoint = cctx.String(nodeEndpointFlag)
 
-	g.Go(func() error {
-		bindAddr := addr + ":443"
-		fmt.Println("Starting HTTPS reverse proxy on: " + bindAddr)
+			http.HandleFunc("/", proxyRequest)
+			g, _ := errgroup.WithContext(context.Background())
 
-		return http.ListenAndServeTLS(
-			bindAddr,
-			path.Join(certDir, "infura.io.crt"),
-			path.Join(certDir, "infura.io.key"),
-			nil,
-		)
-	})
+			g.Go(func() error {
+				bindAddr := addr + ":443"
+				fmt.Println("Starting HTTPS reverse proxy on: " + bindAddr)
 
-	// Just in case
-	g.Go(func() error {
-		bindAddr := addr + ":80"
-		fmt.Println("Starting HTTP redirect on: " + bindAddr)
+				return http.ListenAndServeTLS(
+					bindAddr,
+					path.Join(certDir, "infura.io.crt"),
+					path.Join(certDir, "infura.io.key"),
+					nil,
+				)
+			})
 
-		return http.ListenAndServe(
-			bindAddr,
-			nil,
-		)
-	})
+			// Just in case
+			g.Go(func() error {
+				bindAddr := addr + ":80"
+				fmt.Println("Starting HTTP redirect on: " + bindAddr)
 
-	err := g.Wait()
+				return http.ListenAndServe(
+					bindAddr,
+					nil,
+				)
+			})
 
-	fmt.Println("Could not start liberte: " + err.Error())
+			return g.Wait()
+		},
+	}
+
+	if err := app.Run(os.Args); err != nil {
+		fmt.Println(fmt.Sprintf("Could not start %s: %s", app.Name, err.Error()))
+	}
 }
